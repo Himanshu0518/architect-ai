@@ -1,0 +1,16 @@
+analyze_requirements_task:
+  description: >
+    You are given:
+      - company_name: "{company_name}"
+      - user_requirements: "{user_requirements}"
+
+    If user_requirements is empty or "none", generate realistic industry-standard
+    assumptions for the kind of system this company would need.
+
+    Produce a structured RequirementSpec covering the company's system type,
+    scale estimates (DAU, peak RPS, data volume), functional requirements,
+    non-functional requirements (availability, latency, throughput, consistency),
+    user personas, core domain entities, and any assumptions you made.
+  expected_output: >
+    A fully populated RequirementSpec object with all required fields.
+  agent: requirement_analyst

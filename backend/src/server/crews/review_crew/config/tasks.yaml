@@ -1,0 +1,19 @@
+review_design_task:
+  description: >
+    You are given:
+      Requirements: {requirements}
+      Architecture: {architecture}
+      Subsystems: {subsystems}
+
+    Critically review the complete system design. Assign an overall score from
+    1 to 10. Identify strengths of the design. For each issue found, classify
+    it by severity (critical / high / medium / low), name the affected component,
+    describe the problem, and give a concrete recommendation.
+
+    Assess scalability (bottlenecks, recommendations), reliability (single
+    points of failure, recommendations), security (gaps, recommendations), and
+    cost (rough monthly USD range, cost optimizations). End with a list of the
+    most important final recommendations for the engineering team.
+  expected_output: >
+    A fully populated DesignReview object with all required fields.
+  agent: design_reviewer

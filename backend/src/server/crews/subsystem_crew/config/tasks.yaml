@@ -1,0 +1,19 @@
+design_subsystems_task:
+  description: >
+    You are given:
+      Requirements: {requirements}
+      Architecture: {architecture}
+
+    For every component in the architecture, produce a detailed subsystem
+    specification covering:
+      - API endpoints (method, path, description, request/response shapes)
+      - Database design (type, schema tables/collections, indexes, partitioning)
+      - Caching strategy (strategy type, TTL, cache key patterns)
+      - Scalability (horizontal scaling support, replication, sharding)
+      - Failure modes and mitigations
+
+    Also list all message queues (technology, topics, producers, consumers) and
+    any external third-party integrations (e.g. Stripe, Twilio, SendGrid).
+  expected_output: >
+    A fully populated SubsystemDesign object with all required fields.
+  agent: subsystem_designer

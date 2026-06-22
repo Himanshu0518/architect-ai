@@ -1,0 +1,22 @@
+design_architecture_task:
+  description: >
+    You are given the following RequirementSpec JSON:
+    {requirements}
+
+    Design a complete high-level system architecture. Choose an appropriate
+    architecture style (e.g. microservices, event-driven), define all major
+    components with their type, responsibility, technology choice, and
+    justification. Map all data flows between components with protocols.
+    Define the infrastructure (cloud provider, regions, CDN, load balancer,
+    container orchestration) and document all key design decisions with their
+    rationale and trade-offs. List all API patterns used across the system.
+
+    IMPORTANT — Diagram Generation:
+    After you have assembled the full ArchitectureDesign JSON, call the
+    "Architecture Diagram Generator" tool, passing it the JSON string of your
+    complete ArchitectureDesign. Review the returned Mermaid diagram for
+    correctness — every component you defined must appear as a node and every
+    data flow must appear as an edge.
+  expected_output: >
+    A fully populated ArchitectureDesign object with all required fields.
+  agent: system_architect

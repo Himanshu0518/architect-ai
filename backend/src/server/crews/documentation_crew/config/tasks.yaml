@@ -1,0 +1,98 @@
+generate_documentation_task:
+  description: >
+    You are given the complete system design data:
+      Company Name: {company_name}
+      Requirements: {requirements}
+      Architecture: {architecture}
+      Subsystems: {subsystems}
+      Review: {review}
+
+    Write a comprehensive, publication-ready system design document in Markdown.
+    Structure it as follows:
+
+    # System Design: [Company Name]
+
+    ## Executive Summary
+    Brief overview of what the system does and its scale.
+
+    ## 1. Requirements
+    ### 1.1 Functional Requirements
+    Bulleted list.
+    ### 1.2 Non-Functional Requirements
+    Table with requirement, target value, and rationale.
+    ### 1.3 Scale Estimates
+    Back-of-envelope calculations (DAU, storage, bandwidth, RPS).
+    ### 1.4 Assumptions
+    Bulleted list.
+
+    ## 2. High-Level Architecture
+    ### 2.1 Architecture Overview
+    Prose description.
+    ### 2.2 Architecture Diagram
+    ```mermaid
+    graph TD
+      ... (full Mermaid graph with all components and data flows)
+    ```
+    ### 2.3 Technology Stack
+    Table: Component | Technology | Justification
+
+    ## 3. Component Details
+    For each major component: description, responsibilities, tech choice, scaling strategy.
+
+    ## 4. Data Flow
+    ### 4.1 Primary Data Flow
+    ```mermaid
+    sequenceDiagram
+      ... (key user flows)
+    ```
+    ### 4.2 Key Flows Explained
+    Step-by-step explanation of 2-3 critical paths.
+
+    ## 5. Database Design
+    For each database: schema tables, indexes, partitioning strategy.
+
+    ## 6. API Design
+    For each service: key endpoints in a table (Method | Endpoint | Description).
+
+    ## 7. Caching Strategy
+    What is cached, where, TTL, invalidation strategy.
+
+    ## 8. Scalability & Reliability
+    ### 8.1 Horizontal Scaling
+    ### 8.2 Fault Tolerance & Redundancy
+    ### 8.3 Disaster Recovery
+
+    ## 9. Security
+    Authentication, authorization, encryption, rate limiting.
+
+    ## 10. Design Review
+    ### 10.1 Strengths
+    ### 10.2 Known Trade-offs & Improvements
+    Table: Issue | Severity | Recommendation
+    ### 10.3 Cost Estimate
+    Rough monthly cost range.
+
+    ## 11. Future Considerations
+    What would change at 10x scale.
+
+    DIAGRAM GENERATION WORKFLOW — you MUST follow these steps:
+    1. For Section 2.2 (Architecture Diagram): Call the "Architecture Diagram
+       Generator" tool with the full {architecture} JSON string. Embed the
+       returned Mermaid block verbatim. Do NOT write the diagram by hand.
+
+    2. For Section 4.1 (Primary Data Flows): Call the "Sequence Diagram Generator"
+       tool twice — once with flow_name="booking" and once with flow_name="search"
+       (pass the {subsystems} JSON as subsystem_json). Embed both returned blocks.
+
+    3. After generating EACH diagram: Call the "Mermaid Diagram Validator" tool
+       with the generated Mermaid string. If it returns anything other than "VALID",
+       fix the specific issue it describes and re-validate before embedding.
+
+    Use proper Markdown: tables, bold, code blocks, Mermaid diagrams.
+    Do NOT wrap the entire output in a code fence — write raw Markdown.
+  expected_output: >
+    A complete, well-structured Markdown document covering all sections above,
+    with at least one architecture Mermaid diagram (generated via tool) and two
+    sequence diagrams (booking flow + search flow, generated via tool). All
+    diagrams must have passed the Mermaid Diagram Validator before inclusion.
+  agent: technical_writer
