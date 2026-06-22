@@ -30,49 +30,77 @@ from server.crews.review_crew.review_crew import ReviewCrew
 from server.crews.documentation_crew.documentation_crew import DocumentationCrew
 
 
-async def execute_with_fallback(crew_cls, inputs):
+from server.llm.factory import LLMFactory
+
+async def execute_with_fallback(crew_cls, inputs, progress_queue=None):
     """
-    Executes a crew's kickoff async. If the primary LLM fails due to quota or rate limits,
-    it automatically falls back to Groq.
+    Executes a crew's kickoff async. Cycles through all available LLM providers 
+    from LLMFactory if rate limits or quota errors occur, to avoid blocking.
     """
-    try:
+    providers = LLMFactory.get_all_providers()
+    if not providers:
+        # Fallback to default crew setup if no keys are found
         return await crew_cls().crew().kickoff_async(inputs=inputs)
-    except Exception as e:
-        error_msg = str(e).lower()
-        if "429" in error_msg or "exhausted" in error_msg or "quota" in error_msg or "404" in error_msg:
-            print(f"\n[Warning: Fallback Triggered] Primary LLM failed: {e}")
-            print("Routing request to Groq (llama-3.3-70b-versatile)...")
 
-            # Monkey-patch CrewAI's prompt caching which breaks Groq via litellm
+    while True:
+        for provider_name, provider_llm in providers:
+            print(f"\n[Execute] Routing to provider: {provider_name}...")
+            if progress_queue:
+                await progress_queue.put({
+                    "crew": "System",
+                    "message": f"Using AI Provider: {provider_name.upper()}",
+                    "status": "info"
+                })
             try:
-                import crewai.llms.cache
-                crewai.llms.cache.mark_cache_breakpoint = lambda m: m
-            except Exception:
-                pass
-
-            groq_key = os.environ.get("GROQ_API_KEY")
-            if not groq_key:
-                raise ValueError("GROQ_API_KEY is not set in .env. Cannot fallback.") from e
-
-            groq_llm = LLM(
-                model="groq/llama-3.3-70b-versatile",
-                api_key=groq_key
-            )
-
-            while True:
+                # Monkey-patch CrewAI's prompt caching which breaks some providers via litellm
                 try:
-                    crew_instance = crew_cls().crew()
-                    for agent in crew_instance.agents:
-                        agent.llm = groq_llm
-                    return await crew_instance.kickoff_async(inputs=inputs)
-                except Exception as groq_err:
-                    groq_error_msg = str(groq_err).lower()
-                    if "rate limit" in groq_error_msg or "429" in groq_error_msg or "rate_limit" in groq_error_msg:
-                        print(f"\nGroq rate limit hit. Sleeping for 60 seconds before retrying...")
-                        await asyncio.sleep(60)
-                        continue
-                    raise groq_err
-        raise e
+                    import crewai.llms.cache
+                    crewai.llms.cache.mark_cache_breakpoint = lambda m: m
+                except Exception:
+                    pass
+
+                crew_instance = crew_cls().crew()
+                for agent in crew_instance.agents:
+                    agent.llm = provider_llm
+                
+                return await crew_instance.kickoff_async(inputs=inputs)
+            
+            except Exception as e:
+                error_msg = str(e).lower()
+                # Trigger fallback on: rate limits, quota exhaustion, empty/null responses from provider
+                is_retriable = (
+                    "429" in error_msg
+                    or "exhausted" in error_msg
+                    or "quota" in error_msg
+                    or "404" in error_msg
+                    or "rate limit" in error_msg
+                    or "rate_limit" in error_msg
+                    or "none or empty" in error_msg
+                    or "invalid response from llm" in error_msg
+                    or "empty response" in error_msg
+                    or "overloaded" in error_msg
+                    or "service unavailable" in error_msg
+                    or "529" in error_msg
+                )
+                if is_retriable:
+                    msg = f"Provider {provider_name.upper()} returned an unusable response (quota/empty/overload). Switching to next model..."
+                    print(f"[Fallback] {msg} | Error: {e}")
+                    if progress_queue:
+                        await progress_queue.put({
+                            "crew": "System",
+                            "message": msg,
+                            "status": "warning"
+                        })
+                    continue
+                else:
+                    raise e
+        
+        # If we exhausted all providers, wait a bit and restart the cycle
+        msg = "All providers hit rate limits! Sleeping for 30 seconds before retrying..."
+        print(f"\n[Warning] {msg}")
+        if progress_queue:
+            await progress_queue.put({"crew": "System", "message": msg, "status": "warning"})
+        await asyncio.sleep(30)
 
 
 class DesignState(BaseModel):
@@ -106,73 +134,95 @@ class ArchitectFlow(Flow[DesignState]):
         if crewai_trigger_payload:
             self.state.company_name = crewai_trigger_payload.get("company_name", "Uber")
             self.state.user_requirements = crewai_trigger_payload.get("user_requirements", "none")
+            self.progress_queue = crewai_trigger_payload.get("progress_queue")
         else:
             self.state.company_name = "Uber"
             self.state.user_requirements = "none"
+            self.progress_queue = None
 
         print(f"\n[ArchitectFlow] Starting for: {self.state.company_name}")
         print(f"  User requirements: {self.state.user_requirements}\n")
 
+    async def report_progress(self, crew_name: str, message: str, status: str = "running"):
+        if hasattr(self, "progress_queue") and self.progress_queue:
+            await self.progress_queue.put({"crew": crew_name, "message": message, "status": status})
+
     @listen(gather_input)
     async def analyze_requirements(self):
         """Run RequirementCrew → validate output as RequirementSpec → store JSON."""
+        await self.report_progress("RequirementCrew", "Analyzing business and technical requirements...")
         print("[1/5] Analyzing requirements...")
         result = await execute_with_fallback(RequirementCrew, inputs={
             "company_name": self.state.company_name,
             "user_requirements": self.state.user_requirements,
-        })
+        }, progress_queue=getattr(self, "progress_queue", None))
         # result.pydantic is a RequirementSpec instance (validated by CrewAI)
         self.state.requirements = result.pydantic.model_dump_json()
         print("[1/5] Requirements analysis complete.\n")
-        await asyncio.sleep(5)
+        await asyncio.sleep(3)
 
     @listen(analyze_requirements)
     async def design_architecture(self):
         """Run ArchitectureCrew → validate output as ArchitectureDesign → store JSON."""
+        await self.report_progress("ArchitectureCrew", "Designing high-level system architecture and selecting technologies...")
         print("[2/5] Designing architecture...")
         result = await execute_with_fallback(ArchitectureCrew, inputs={
             "requirements": self.state.requirements,
-        })
+        }, progress_queue=getattr(self, "progress_queue", None))
         self.state.architecture = result.pydantic.model_dump_json()
         print("[2/5] Architecture design complete.\n")
-        await asyncio.sleep(5)
+        # Write temp file for mermaid tools to read without needing huge LLM args
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+        with open(output_dir / "temp_architecture.json", "w", encoding="utf-8") as f:
+            f.write(self.state.architecture)
+        await asyncio.sleep(3)
 
     @listen(design_architecture)
     async def detail_subsystems(self):
         """Run SubsystemCrew → validate output as SubsystemDesign → store JSON."""
+        await self.report_progress("SubsystemCrew", "Detailing subsystems, API endpoints, and database schemas...")
         print("[3/5] Detailing subsystems...")
         result = await execute_with_fallback(SubsystemCrew, inputs={
             "requirements": self.state.requirements,
             "architecture": self.state.architecture,
-        })
+        }, progress_queue=getattr(self, "progress_queue", None))
         self.state.subsystems = result.pydantic.model_dump_json()
         print("[3/5] Subsystem design complete.\n")
-        await asyncio.sleep(5)
+        # Write temp file for mermaid tools to read without needing huge LLM args
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+        with open(output_dir / "temp_subsystems.json", "w", encoding="utf-8") as f:
+            f.write(self.state.subsystems)
+        await asyncio.sleep(3)
 
-    @listen(detail_subsystems)
-    async def review_design(self):
-        """Run ReviewCrew → validate output as DesignReview → store JSON."""
-        print("[4/5] Reviewing design...")
-        result = await execute_with_fallback(ReviewCrew, inputs={
-            "requirements": self.state.requirements,
-            "architecture": self.state.architecture,
-            "subsystems": self.state.subsystems,
-        })
-        self.state.review = result.pydantic.model_dump_json()
-        print("[4/5] Design review complete.\n")
-        await asyncio.sleep(5)
+    # ── ReviewCrew temporarily disabled ──────────────────────────────────────
+    # @listen(detail_subsystems)
+    # async def review_design(self):
+    #     """Run ReviewCrew → validate output as DesignReview → store JSON."""
+    #     await self.report_progress("ReviewCrew", "Critiquing the design for scalability, reliability, and security gaps...")
+    #     print("[4/5] Reviewing design...")
+    #     result = await execute_with_fallback(ReviewCrew, inputs={
+    #         "requirements": self.state.requirements,
+    #         "architecture": self.state.architecture,
+    #         "subsystems": self.state.subsystems,
+    #     }, progress_queue=getattr(self, "progress_queue", None))
+    #     self.state.review = result.pydantic.model_dump_json()
+    #     print("[4/5] Design review complete.\n")
+    #     await asyncio.sleep(3)
 
-    @listen(review_design)
+    @listen(detail_subsystems)  # now chains directly from SubsystemCrew (ReviewCrew disabled)
     async def generate_documentation(self):
         """Run DocumentationCrew → compile final Markdown (no Pydantic output)."""
-        print("[5/5] Generating documentation...")
+        await self.report_progress("DocumentationCrew", "Compiling final Markdown document and generating Mermaid diagrams...")
+        print("[4/4] Generating documentation...")
         result = await execute_with_fallback(DocumentationCrew, inputs={
             "company_name": self.state.company_name,
             "requirements": self.state.requirements,
             "architecture": self.state.architecture,
             "subsystems": self.state.subsystems,
-            "review": self.state.review,
-        })
+            "review": "(Review step disabled — skipped for speed)",
+        }, progress_queue=getattr(self, "progress_queue", None))
         # DocumentationCrew produces raw Markdown — use result.raw
         self.state.final_document = result.raw
 

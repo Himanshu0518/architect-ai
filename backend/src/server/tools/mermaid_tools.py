@@ -80,14 +80,8 @@ def _resolve_class(comp_type: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class ArchitectureDiagramInput(BaseModel):
-    architecture_json: str = Field(
-        ...,
-        description=(
-            "A JSON string representing an ArchitectureDesign object. "
-            "Must contain 'components' (list of {name, type, technology, ...}) "
-            "and 'data_flow' (list of {from, to, protocol, description})."
-        ),
-    )
+    pass
+
 
 
 class ArchitectureDiagramTool(BaseTool):
@@ -102,15 +96,17 @@ class ArchitectureDiagramTool(BaseTool):
 
     name: str = "Architecture Diagram Generator"
     description: str = (
-        "Converts an ArchitectureDesign JSON (with 'components' and 'data_flow') "
-        "into a syntactically valid Mermaid graph TD diagram. "
-        "Use this to generate the High-Level Architecture section diagram. "
-        "Input must be the raw JSON string of the ArchitectureDesign object."
+        "Generates a syntactically valid Mermaid graph TD diagram for the High-Level Architecture. "
+        "Call this tool without any arguments to generate the architecture diagram."
     )
     args_schema: Type[BaseModel] = ArchitectureDiagramInput
 
-    def _run(self, architecture_json: str) -> str:  # type: ignore[override]
+    def _run(self, **kwargs) -> str:  # type: ignore[override]
+        # Read from temp file written by main.py after ArchitectureCrew completes.
+        # We ignore any kwargs the LLM passes — the data is sourced from disk.
         try:
+            with open("output/temp_architecture.json", "r", encoding="utf-8") as f:
+                architecture_json = f.read()
             data = json.loads(architecture_json)
         except json.JSONDecodeError as exc:
             return f"ERROR: Invalid JSON — {exc}"
@@ -179,14 +175,6 @@ class SequenceDiagramInput(BaseModel):
             "The tool picks the most relevant subsystems automatically."
         ),
     )
-    subsystem_json: str = Field(
-        ...,
-        description=(
-            "A JSON string of the SubsystemDesign object. "
-            "Must contain 'subsystems' (list of Subsystem objects with api_endpoints, "
-            "database, message_queues, etc.) and optionally 'message_queues'."
-        ),
-    )
 
 
 class SequenceDiagramTool(BaseTool):
@@ -202,9 +190,9 @@ class SequenceDiagramTool(BaseTool):
     name: str = "Sequence Diagram Generator"
     description: str = (
         "Builds a Mermaid sequenceDiagram for a named flow (e.g. 'booking', 'search', "
-        "'messaging', 'payment') from a SubsystemDesign JSON. "
+        "'messaging', 'payment'). "
         "Use this to generate the Data Flow section diagrams. "
-        "Inputs: flow_name (string) and subsystem_json (SubsystemDesign JSON string)."
+        "Inputs: flow_name (string)."
     )
     args_schema: Type[BaseModel] = SequenceDiagramInput
 
@@ -236,8 +224,12 @@ class SequenceDiagramTool(BaseTool):
         scored.sort(key=lambda x: x[0], reverse=True)
         return [sub for _, sub in scored[:6]]
 
-    def _run(self, flow_name: str, subsystem_json: str) -> str:  # type: ignore[override]
+    def _run(self, flow_name: str = "booking", **kwargs) -> str:  # type: ignore[override]
+        # Read from temp file written by main.py after SubsystemCrew completes.
+        # We ignore any extra kwargs the LLM passes — the data is sourced from disk.
         try:
+            with open("output/temp_subsystems.json", "r", encoding="utf-8") as f:
+                subsystem_json = f.read()
             data = json.loads(subsystem_json)
         except json.JSONDecodeError as exc:
             return f"ERROR: Invalid JSON — {exc}"
